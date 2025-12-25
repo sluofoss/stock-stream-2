@@ -8,3 +8,45 @@ wheels/
 
 # Virtual environments
 .venv
+venv/
+env/
+
+# Environment files
+.env
+.env.local
+.env.*
+
+# Project data
+data/
+.cache/
+*.parquet
+backtest_results/
+results/
+logs/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+
+# Terraform
+terraform/.terraform/
+terraform/*.tfstate*
+terraform/.terraform.lock.hcl
+
+# Lambda packages
+lambda_packages/
+*.zip
+
+# AWS
+.aws/
+*.pem
+
+# OS
+.DS_Store
+Thumbs.db
