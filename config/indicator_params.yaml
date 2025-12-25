@@ -1,0 +1,58 @@
+# Technical Indicator Parameters
+# Default parameters for calculating technical indicators
+
+moving_averages:
+  sma:
+    periods: [10, 20, 50, 100, 200]
+  ema:
+    periods: [12, 20, 26, 50, 100]
+  wma:
+    periods: [20, 50]
+
+momentum:
+  rsi:
+    period: 14
+    overbought: 70
+    oversold: 30
+  macd:
+    fast_period: 12
+    slow_period: 26
+    signal_period: 9
+  stochastic:
+    k_period: 14
+    d_period: 3
+    smooth_k: 3
+  cci:
+    period: 20
+  williams_r:
+    period: 14
+  roc:
+    period: 10
+
+volatility:
+  bollinger_bands:
+    period: 20
+    num_std_dev: 2
+  atr:
+    period: 14
+  standard_deviation:
+    period: 20
+  keltner_channels:
+    period: 20
+    atr_multiplier: 2
+
+volume:
+  obv:
+    enabled: true
+  vwap:
+    enabled: true
+  money_flow_index:
+    period: 14
+  accumulation_distribution:
+    enabled: true
+
+# Indicator calculation settings
+calculation:
+  skip_incomplete_periods: true  # Skip rows where indicators can't be calculated
+  fill_method: "none"            # "none", "forward", "backward", "interpolate"
+  min_periods_required: true     # Require minimum periods for each indicator

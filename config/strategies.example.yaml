@@ -1,0 +1,11 @@
+# Example strategies configuration
+# Copy this to strategies.yaml and customize
+
+strategies:
+  moving_average_crossover:
+    name: MovingAverageCrossover
+    description: Buy when fast MA crosses above slow MA, sell when crosses below
+    enabled: true
+    parameters:
+      fast_period: 20
+      slow_period: 50

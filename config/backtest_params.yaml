@@ -1,0 +1,42 @@
+# Backtesting Parameters
+# Default parameters for running backtests
+
+portfolio:
+  initial_capital: 100000.0
+  currency: AUD
+  
+execution:
+  commission_rate: 0.001        # 0.1% per trade (10 basis points)
+  slippage_rate: 0.0005         # 0.05% slippage (5 basis points)
+  order_type: market            # market, limit, stop
+  
+position_sizing:
+  method: equal_weight          # equal_weight, risk_parity, kelly
+  max_position_size: 0.10       # 10% of portfolio per position
+  min_position_size: 0.01       # 1% minimum
+  max_positions: 10             # Maximum number of open positions
+  
+risk_management:
+  max_daily_loss: 0.02          # 2% maximum daily loss
+  max_drawdown: 0.20            # 20% maximum drawdown
+  stop_loss_pct: 0.05           # 5% stop loss per position
+  take_profit_pct: 0.15         # 15% take profit per position
+  
+rebalancing:
+  frequency: monthly            # daily, weekly, monthly, quarterly
+  threshold: 0.05               # 5% deviation triggers rebalance
+  
+performance:
+  benchmark: "^AXJO"            # ASX 200 Index
+  risk_free_rate: 0.04          # 4% annual risk-free rate
+  
+simulation:
+  start_date: "2020-01-01"
+  end_date: "2024-12-31"
+  warmup_period: 100            # Days of warmup data before trading
+  
+output:
+  save_trades: true
+  save_equity_curve: true
+  generate_report: true
+  plot_results: true
