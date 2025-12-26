@@ -1,5 +1,13 @@
 # API Specification
 
+## Overview
+
+The Stock Stream 2 system uses AWS Step Functions to orchestrate a daily pipeline that:
+1. Updates ASX symbol list via Lambda
+2. Splits symbols into batches of 100
+3. Invokes parallel Lambda instances to fetch stock data
+4. Stores results as Parquet files in S3
+
 ## Module Interfaces
 
 ### 1. Stock Data Fetcher Module
@@ -8,10 +16,16 @@
 ```python
 def lambda_handler(event: dict, context: LambdaContext) -> dict:
     """
-    AWS Lambda handler for fetching stock data.
+    AWS Lambda handler for fetching stock data for a batch of symbols.
+    Invoked by Step Functions with a batch of up to 100 symbols.
     
     Args:
-        event: EventBridge event containing configuration
+        event: Step Functions event containing:
+            {
+                "symbols": List[str],  # Up to 100 symbols
+                "date": str,           # Optional: ISO date format
+                "batchNumber": int     # Batch identifier
+            }
         context: AWS Lambda context object
         
     Returns:
@@ -19,21 +33,23 @@ def lambda_handler(event: dict, context: LambdaContext) -> dict:
             'statusCode': int,
             'body': str,
             'metadata': {
+                'batch_number': int,
                 'symbols_processed': int,
+                'symbols_fetched': int,
                 'symbols_failed': List[str],
                 'execution_time': float,
-                's3_key': str
+                's3_key': str  # e.g., "raw-data/2025-12-26-batch-0.parquet"
             }
         }
     """
 ```
 
-#### Configuration Schema (config/symbols.json)
+#### Input Event Schema
 ```json
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
-  "required": ["symbols", "market"],
+  "required": ["symbols", "batchNumber"],
   "properties": {
     "symbols": {
       "type": "array",
@@ -41,16 +57,17 @@ def lambda_handler(event: dict, context: LambdaContext) -> dict:
         "type": "string",
         "pattern": "^[A-Z0-9]{1,5}$"
       },
-      "minItems": 1
+      "minItems": 1,
+      "maxItems": 100
     },
-    "market": {
-      "type": "string",
-      "enum": ["ASX", "NYSE", "NASDAQ"]
+    "batchNumber": {
+      "type": "integer",
+      "minimum": 0
     },
-    "update_frequency": {
+    "date": {
       "type": "string",
-      "enum": ["daily", "weekly"],
-      "default": "daily"
+      "format": "date",
+      "description": "Optional: ISO 8601 date (YYYY-MM-DD)"
     }
   }
 }
@@ -75,7 +92,20 @@ class StockDailyData:
     
     # Metadata fields
     fetch_timestamp: str  # ISO 8601
+    batch_number: int     # Which batch this came from
     data_source: str = "yahoo_finance"
+```
+
+#### S3 Output Structure
+```
+s3://bucket-name/
+├── raw-data/
+│   ├── 2025-12-26-batch-0.parquet   # First 100 symbols
+│   ├── 2025-12-26-batch-1.parquet   # Next 100 symbols
+│   ├── 2025-12-26-batch-2.parquet   # Next 100 symbols
+│   └── ...
+└── symbols/
+    └── 2025-12-26-symbols.csv
 ```
 
 ### 2. ASX Symbol Updater Module
@@ -85,43 +115,185 @@ class StockDailyData:
 def lambda_handler(event: dict, context: LambdaContext) -> dict:
     """
     AWS Lambda handler for updating ASX symbols.
+    First step in Step Functions workflow.
+    
+    Args:
+        event: Step Functions initiation event (typically empty or with date override)
+        context: AWS Lambda context object
     
     Returns:
         dict: {
             'statusCode': int,
             'body': str,
-            'changes': {
-                'added': List[str],
-                'removed': List[str],
-                'modified': List[str]
+            'symbols': List[str],           # All symbols (flat list)
+            'symbolBatches': List[dict],    # Batched for Step Functions Map
+            'metadata': {
+                'total_symbols': int,
+                'num_batches': int,
+                's3_key': str,              # CSV location
+                'changes': {
+                    'added': List[str],
+                    'removed': List[str]
+                }
             }
         }
     """
 ```
 
-#### Symbol List Schema (S3: config/symbols.json)
-```python
-from dataclasses import dataclass
-from datetime import datetime
-from typing import List
-
-@dataclass
-class StockSymbol:
-    symbol: str
-    name: str
-    sector: str
-    industry: Optional[str] = None
-    market_cap: Optional[float] = None
-    
-@dataclass
-class SymbolList:
-    updated_at: datetime
-    source: str  # "asx_official"
-    version: str  # Semantic versioning
-    symbols: List[StockSymbol]
+#### Output Format for Step Functions
+```json
+{
+  "statusCode": 200,
+  "symbols": ["BHP", "CBA", "NAB", ...],
+  "symbolBatches": [
+    {
+      "symbols": ["BHP", "CBA", ...],
+      "batchNumber": 0
+    },
+    {
+      "symbols": ["WBC", "ANZ", ...],
+      "batchNumber": 1
+    }
+  ],
+  "metadata": {
+    "total_symbols": 2147,
+    "num_batches": 22,
+    "s3_key": "symbols/2025-12-26-symbols.csv"
+  }
+}
 ```
 
-### 3. Data Aggregator Module
+#### CSV Output Schema (S3)
+```csv
+symbol,name,sector,market_cap,last_updated
+BHP,BHP Group Limited,Materials,180500000000,2025-12-26T00:00:00Z
+CBA,Commonwealth Bank,Financials,165200000000,2025-12-26T00:00:00Z
+```
+
+### 3. Step Functions State Machine
+
+#### State Machine Definition
+```json
+{
+  "Comment": "Daily Stock Data Pipeline - Fetch ASX symbols and stock data in parallel batches",
+  "StartAt": "UpdateASXSymbols",
+  "States": {
+    "UpdateASXSymbols": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:${AWS_REGION}:${AWS_ACCOUNT_ID}:function:asx-symbol-updater",
+      "Comment": "Step 1: Fetch latest ASX symbols and export to CSV",
+      "Retry": [
+        {
+          "ErrorEquals": ["States.TaskFailed"],
+          "IntervalSeconds": 60,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "NotifyFailure",
+          "ResultPath": "$.error"
+        }
+      ],
+      "Next": "SplitIntoBatches"
+    },
+    "SplitIntoBatches": {
+      "Type": "Map",
+      "Comment": "Step 2: Process symbol batches in parallel (max 10 concurrent)",
+      "ItemsPath": "$.symbolBatches",
+      "MaxConcurrency": 10,
+      "Iterator": {
+        "StartAt": "FetchStockData",
+        "States": {
+          "FetchStockData": {
+            "Type": "Task",
+            "Resource": "arn:aws:lambda:${AWS_REGION}:${AWS_ACCOUNT_ID}:function:stock-data-fetcher",
+            "Comment": "Fetch stock data for batch of 100 symbols",
+            "Retry": [
+              {
+                "ErrorEquals": ["States.TaskFailed"],
+                "IntervalSeconds": 30,
+                "MaxAttempts": 2,
+                "BackoffRate": 1.5
+              }
+            ],
+            "Catch": [
+              {
+                "ErrorEquals": ["States.ALL"],
+                "ResultPath": "$.batchError",
+                "Next": "BatchFailed"
+              }
+            ],
+            "End": true
+          },
+          "BatchFailed": {
+            "Type": "Pass",
+            "Comment": "Mark batch as failed but continue processing other batches",
+            "Result": {
+              "status": "failed"
+            },
+            "End": true
+          }
+        }
+      },
+      "ResultPath": "$.batchResults",
+      "Next": "AggregateResults"
+    },
+    "AggregateResults": {
+      "Type": "Pass",
+      "Comment": "Collect results from all batches",
+      "End": true
+    },
+    "NotifyFailure": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Parameters": {
+        "TopicArn": "arn:aws:sns:${AWS_REGION}:${AWS_ACCOUNT_ID}:stock-stream-alerts",
+        "Subject": "Stock Stream Pipeline Failed",
+        "Message.$": "$.error"
+      },
+      "End": true
+    }
+  }
+}
+```
+
+#### Execution Flow
+```
+1. EventBridge (Daily Trigger)
+        ↓
+2. Step Functions: UpdateASXSymbols
+        ↓
+3. Lambda: ASX Symbol Updater
+        ↓ (returns symbolBatches array)
+4. Step Functions: Map State (parallel)
+        ↓
+5. Lambda: Stock Data Fetcher (×N instances)
+        ↓
+6. S3: Multiple Parquet files (batch-0, batch-1, ...)
+        ↓
+7. Step Functions: AggregateResults
+        ↓
+8. End (or NotifyFailure on error)
+```
+
+#### Timing Estimates
+- **ASX Symbol Update:** 1-2 minutes
+- **Single Batch (100 symbols):** 3-4 minutes
+- **10 Parallel Batches (1000 symbols):** 3-4 minutes (same as single, runs in parallel)
+- **Total Pipeline (1000 symbols):** ~5-6 minutes
+
+#### Cost Estimates (Per Daily Run)
+- **Step Functions:** ~$0.000025 per state transition (~10 transitions = $0.00025)
+- **Lambda (ASX Updater):** ~$0.001
+- **Lambda (Stock Fetcher):** ~$0.01 per batch × 10 batches = $0.10
+- **S3 Storage:** ~$0.023 per GB/month
+- **Total Daily Cost:** ~$0.10
+- **Monthly Cost:** ~$3.00
+
+### 4. Data Aggregator Module
 
 #### Public API
 ```python

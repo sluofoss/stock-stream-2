@@ -37,64 +37,113 @@
 ## Phase 2: Module 1 - Stock Data Fetcher
 
 ### Core Implementation
-- [ ] Create modules/stock_data_fetcher/handler.py
-- [ ] Implement lambda_handler function
-- [ ] Create modules/stock_data_fetcher/fetcher.py
-- [ ] Implement YahooFinanceFetcher class
-- [ ] Add retry logic with exponential backoff
-- [ ] Implement rate limiting
-- [ ] Add data validation
-- [ ] Create modules/stock_data_fetcher/storage.py
-- [ ] Implement S3 upload with error handling
-- [ ] Add Parquet conversion with Polars
+- [x] Create modules/stock_data_fetcher/handler.py
+- [x] Implement lambda_handler function with batch support
+- [x] Accept symbolBatches from Step Functions
+- [x] Create modules/stock_data_fetcher/fetcher.py
+- [x] Implement YahooFinanceFetcher class
+- [x] Add retry logic with exponential backoff
+- [x] Implement rate limiting (2s delay between symbols)
+- [x] Add data validation
+- [x] Create modules/stock_data_fetcher/storage.py
+- [x] Implement S3 upload with error handling
+- [x] Add Parquet conversion with Polars
+- [x] Support batch-numbered filenames (YYYY-MM-DD-batch-N.parquet)
 
 ### Configuration & Utilities
-- [ ] Create modules/stock_data_fetcher/config.py
-- [ ] Implement configuration loading from S3
-- [ ] Create modules/common/logger.py with structured logging
-- [ ] Create modules/common/exceptions.py for custom exceptions
-- [ ] Create modules/common/validators.py for data validation
+- [x] Create modules/stock_data_fetcher/config.py
+- [x] Implement configuration loading from environment
+- [x] Create modules/common/logger.py with structured logging
+- [x] Create modules/common/exceptions.py for custom exceptions
+- [x] Create modules/common/validators.py for data validation
 
 ### Testing
-- [ ] Write unit tests for fetcher logic
+- [ ] Write unit tests for fetcher logic with batch parameters
 - [ ] Write unit tests for data validation
-- [ ] Write unit tests for S3 storage
+- [ ] Write unit tests for S3 storage with batch filenames
 - [ ] Create fixtures for mock stock data
 - [ ] Write integration tests with moto (mock AWS)
 - [ ] Test error scenarios (network failures, invalid data)
+- [ ] Test batch processing logic
 
 ### Lambda Packaging
 - [ ] Create modules/stock_data_fetcher/requirements.txt
-- [ ] Create Dockerfile for Lambda (optional)
 - [ ] Create build script for Lambda deployment package
 - [ ] Test Lambda package locally with SAM CLI (optional)
+- [ ] Optimize package size (remove unnecessary dependencies)
 
 ## Phase 3: Module 2 - ASX Symbol Updater
 
 ### Core Implementation
 - [ ] Create modules/asx_symbol_updater/handler.py
 - [ ] Implement lambda_handler function
+- [ ] Return symbolBatches array for Step Functions Map state
+- [ ] Format output: [{symbols: [...], batchNumber: N}, ...]
 - [ ] Create modules/asx_symbol_updater/scraper.py
-- [ ] Implement ASX website scraper
+- [ ] Implement ASX website scraper or API client
 - [ ] Add CSV parsing logic
+- [ ] Create modules/asx_symbol_updater/batcher.py
+- [ ] Implement batch splitting logic (100 symbols per batch)
 - [ ] Create modules/asx_symbol_updater/comparator.py
 - [ ] Implement version comparison logic
 - [ ] Detect additions, removals, modifications
 - [ ] Create modules/asx_symbol_updater/publisher.py
-- [ ] Implement S3 versioned upload
-- [ ] Add change notification via SNS
+- [ ] Implement S3 CSV upload (symbols/YYYY-MM-DD-symbols.csv)
+- [ ] Add change notification via SNS (optional)
 
 ### Testing
 - [ ] Write unit tests for scraper
 - [ ] Create fixtures for mock ASX data
+- [ ] Write unit tests for batch splitting (edge cases: 0, 99, 100, 101, 1000)
 - [ ] Write unit tests for comparator
 - [ ] Write unit tests for publisher
 - [ ] Write integration tests with mocked ASX website
-- [ ] Test versioning and rollback scenarios
+- [ ] Test Step Functions output format
 
 ### Lambda Packaging
 - [ ] Create modules/asx_symbol_updater/requirements.txt
 - [ ] Create build script for Lambda package
+
+## Phase 3.5: Step Functions Integration
+
+### State Machine Definition
+- [ ] Create terraform/step_functions.tf
+- [ ] Define Step Functions state machine
+- [ ] Configure UpdateASXSymbols task (Lambda invocation)
+- [ ] Configure SplitIntoBatches map state
+- [ ] Set MaxConcurrency to 10
+- [ ] Configure retry logic for both steps
+- [ ] Configure error handling and notifications
+- [ ] Add CloudWatch logging
+
+### EventBridge Trigger
+- [ ] Create terraform/eventbridge.tf
+- [ ] Define daily EventBridge rule (cron schedule)
+- [ ] Connect EventBridge to Step Functions
+- [ ] Configure rule target with proper IAM permissions
+
+### IAM Permissions
+- [ ] Create IAM role for Step Functions execution
+- [ ] Grant Step Functions permission to invoke both Lambdas
+- [ ] Grant Step Functions permission to write CloudWatch logs
+- [ ] Grant Step Functions permission to publish SNS notifications
+- [ ] Update Lambda execution roles for S3 access
+
+### Testing
+- [ ] Test Step Functions state machine manually
+- [ ] Test with small batch (10 symbols)
+- [ ] Test with medium batch (100 symbols)
+- [ ] Test with large batch (1000 symbols)
+- [ ] Test error scenarios (Lambda failure, partial failures)
+- [ ] Test retry logic
+- [ ] Verify CloudWatch logs
+
+### Monitoring
+- [ ] Create CloudWatch dashboard for pipeline
+- [ ] Add metrics: execution time, success rate, symbol count
+- [ ] Create CloudWatch alarms for failures
+- [ ] Configure SNS topic for alerts
+- [ ] Test alert notifications
 
 ## Phase 4: Module 3 - Data Aggregator
 
@@ -105,6 +154,7 @@
 - [ ] Implement load_all_data() with lazy loading
 - [ ] Implement load_date_range()
 - [ ] Implement load_symbols()
+- [ ] Implement merge_daily_batches() - combine batch-N files for a date
 - [ ] Implement get_available_symbols()
 - [ ] Implement get_date_range()
 - [ ] Create modules/data_aggregator/cache.py
@@ -115,17 +165,20 @@
 
 ### Testing
 - [ ] Write unit tests for loader
-- [ ] Create fixture Parquet files
+- [ ] Create fixture Parquet files with batch naming (batch-0, batch-1, etc.)
+- [ ] Write unit tests for batch merging
 - [ ] Write unit tests for caching
 - [ ] Write integration tests with mocked S3
 - [ ] Test lazy loading performance
 - [ ] Test date range filtering
 - [ ] Test symbol filtering
+- [ ] Test handling of missing batches
 
 ### Documentation
 - [ ] Write API documentation for DataAggregator
-- [ ] Create usage examples
+- [ ] Create usage examples showing batch file handling
 - [ ] Document caching behavior
+- [ ] Document batch file naming convention
 
 ## Phase 5: Module 4 - Technical Indicators
 

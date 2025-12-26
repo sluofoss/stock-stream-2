@@ -18,19 +18,41 @@ logger = get_logger(__name__, level=os.getenv("LOG_LEVEL", "INFO"))
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     """AWS Lambda handler for fetching stock data.
 
+    Invoked by AWS Step Functions as part of a parallel batch processing workflow.
+    Each invocation processes up to 100 symbols and saves results to S3 as a separate Parquet file.
+
     Args:
-        event: EventBridge event (can include custom date or symbols)
+        event: Step Functions event with the following structure:
+            {
+                "symbols": List[str],      # Up to 100 symbols to fetch
+                "batchNumber": int,        # Batch identifier (0, 1, 2, ...)
+                "date": str (optional)     # ISO date format (YYYY-MM-DD)
+            }
         context: AWS Lambda context object
 
     Returns:
-        Dictionary with status code, body, and metadata
+        Dictionary with status code, body, and metadata:
+        {
+            "statusCode": 200,
+            "body": JSON string,
+            "metadata": {
+                "batch_number": int,
+                "symbols_processed": int,
+                "symbols_fetched": int,
+                "symbols_failed": int,
+                "execution_time": float,
+                "s3_key": str  # e.g., "raw-data/2025-12-26-batch-0.parquet"
+            }
+        }
     """
     start_time = datetime.utcnow()
     request_id = context.request_id if hasattr(context, "request_id") else "local"
+    batch_number = event.get("batchNumber", 0)
 
     logger.info(
         "Lambda execution started",
         request_id=request_id,
+        batch_number=batch_number,
         event=event,
     )
 
@@ -39,13 +61,18 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         config = Config()
         logger.info("Configuration loaded", config=config.to_dict())
 
-        # Get symbols to fetch
+        # Get symbols from Step Functions event (batch of up to 100)
         if "symbols" in event:
-            # Custom symbols from event
+            # Symbols provided by Step Functions
             symbols = event["symbols"]
-            logger.info(f"Using symbols from event: {symbols}")
+            logger.info(
+                f"Processing batch {batch_number} with {len(symbols)} symbols",
+                batch_number=batch_number,
+                symbol_count=len(symbols)
+            )
         else:
-            # Load from S3 configuration
+            # Fallback: Load from S3 configuration (for backward compatibility)
+            logger.warning("No symbols in event, falling back to S3 configuration")
             try:
                 symbols = config.load_symbols_from_s3()
             except Exception as e:
@@ -72,7 +99,11 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         )
 
         # Fetch data
-        logger.info(f"Fetching data for {len(symbols)} symbols")
+        logger.info(
+            f"Fetching data for batch {batch_number}: {len(symbols)} symbols",
+            batch_number=batch_number,
+            symbol_count=len(symbols)
+        )
         df = fetcher.fetch_multiple_symbols(symbols, fetch_date)
 
         # Initialize storage
@@ -82,8 +113,8 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             region=config.aws_region,
         )
 
-        # Upload to S3
-        s3_key = storage.upload_dataframe(df, fetch_date)
+        # Upload to S3 with batch number in filename
+        s3_key = storage.upload_dataframe(df, fetch_date, batch_number=batch_number)
 
         # Calculate execution time
         execution_time = (datetime.utcnow() - start_time).total_seconds()
@@ -95,6 +126,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             "body": json.dumps({
                 "message": "Stock data fetched successfully",
                 "date": str(fetch_date),
+                "batch_number": batch_number,
                 "symbols_processed": stats["total_symbols"],
                 "symbols_fetched": stats["symbols_fetched"],
                 "symbols_failed": stats["symbols_failed"],
@@ -104,6 +136,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             "metadata": {
                 "request_id": request_id,
                 "timestamp": datetime.utcnow().isoformat(),
+                "batch_number": batch_number,
                 "symbols_processed": stats["total_symbols"],
                 "symbols_fetched": stats["symbols_fetched"],
                 "symbols_failed": stats["symbols_failed"],
@@ -115,6 +148,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         logger.info(
             "Lambda execution completed successfully",
             request_id=request_id,
+            batch_number=batch_number,
             execution_time=execution_time,
             symbols_fetched=stats["symbols_fetched"],
             symbols_failed=stats["symbols_failed"],

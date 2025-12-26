@@ -5,6 +5,7 @@ A serverless stock data pipeline and backtesting framework for ASX stocks, deplo
 ## Table of Contents
 - [Overview](#overview)
 - [Architecture](#architecture)
+- [Step Functions Orchestration](#step-functions-orchestration)
 - [Modules](#modules)
 - [Prerequisites](#prerequisites)
 - [Setup & Installation](#setup--installation)
@@ -25,9 +26,10 @@ A serverless stock data pipeline and backtesting framework for ASX stocks, deplo
 This repository contains a serverless data pipeline for:
 1. Fetching and storing daily stock data from Yahoo Finance
 2. Maintaining up-to-date ASX stock symbol lists
-3. Historical data aggregation and analysis
-4. Technical indicator calculation
-5. Strategy backtesting with stateful portfolio management
+3. Parallel batch processing with AWS Step Functions
+4. Historical data aggregation and analysis
+5. Technical indicator calculation
+6. Strategy backtesting with stateful portfolio management
 
 **Key Features:**
 - One-command deployment via Terraform
@@ -38,54 +40,131 @@ This repository contains a serverless data pipeline for:
 
 ## Architecture
 
+The system uses AWS Step Functions to orchestrate a daily data pipeline that:
+1. Updates the list of ASX-listed stocks
+2. Fetches stock data in parallel batches of 100 symbols
+
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                         AWS Cloud                            │
-├─────────────────────────────────────────────────────────────┤
-│                                                               │
-│  ┌──────────────┐         ┌──────────────┐                  │
-│  │ EventBridge  │────────>│   Lambda 1   │                  │
-│  │  (Daily)     │         │ Stock Data   │                  │
-│  └──────────────┘         │  Fetcher     │                  │
-│                            └──────┬───────┘                  │
-│                                   │                          │
-│  ┌──────────────┐         ┌──────▼───────┐                  │
-│  │ EventBridge  │────────>│   Lambda 2   │                  │
-│  │  (Weekly)    │         │ ASX Symbol   │                  │
-│  └──────────────┘         │   Updater    │                  │
-│                            └──────┬───────┘                  │
-│                                   │                          │
-│                            ┌──────▼───────┐                  │
-│                            │      S3      │                  │
-│                            │   Bucket     │                  │
-│                            │  (Parquet)   │                  │
-│                            └──────┬───────┘                  │
-│                                   │                          │
-│                     ┌─────────────▼────────────┐             │
-│                     │   Local/Lambda Module    │             │
-│                     │  Data Aggregator +       │             │
-│                     │  Indicator Calculator +  │             │
-│                     │  Backtesting Engine      │             │
-│                     └──────────────────────────┘             │
-└─────────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────────┐
+│                           AWS Cloud                                │
+├───────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  ┌──────────────┐         ┌────────────────────────────┐          │
+│  │ EventBridge  │────────>│   Step Functions           │          │
+│  │  (Daily)     │         │   State Machine            │          │
+│  └──────────────┘         │   (Orchestrator)           │          │
+│                            └─────────┬──────────────────┘          │
+│                                      │                             │
+│                                      ▼                             │
+│                            ┌────────────────────┐                  │
+│                            │  Step 1: Lambda    │                  │
+│                            │  ASX Symbol        │                  │
+│                            │  Updater           │                  │
+│                            │                    │                  │
+│                            │  - Fetch ASX list  │                  │
+│                            │  - Export to CSV   │                  │
+│                            │  - Upload to S3    │                  │
+│                            └─────────┬──────────┘                  │
+│                                      │                             │
+│                                      ▼                             │
+│                            ┌────────────────────┐                  │
+│                            │  Step 2: Map State │                  │
+│                            │  (Parallel)        │                  │
+│                            │                    │                  │
+│                            │  Split symbols     │                  │
+│                            │  into batches of   │                  │
+│                            │  100 symbols each  │                  │
+│                            └─────────┬──────────┘                  │
+│                                      │                             │
+│              ┌───────────────────────┼───────────────────┐         │
+│              ▼                       ▼                   ▼         │
+│    ┌──────────────────┐   ┌──────────────────┐   ┌──────────────┐│
+│    │ Lambda: Stock    │   │ Lambda: Stock    │   │ Lambda: More │││
+│    │ Data Fetcher     │   │ Data Fetcher     │   │ Instances... │││
+│    │                  │   │                  │   │              │││
+│    │ Batch 1          │   │ Batch 2          │   │ Batch N      │││
+│    │ (100 symbols)    │   │ (100 symbols)    │   │ (100 symbols)│││
+│    │                  │   │                  │   │              │││
+│    │ → Parquet to S3  │   │ → Parquet to S3  │   │ → Parquet    │││
+│    └──────────────────┘   └──────────────────┘   └──────────────┘│
+│              │                       │                   │         │
+│              └───────────────────────┼───────────────────┘         │
+│                                      ▼                             │
+│                            ┌────────────────────┐                  │
+│                            │      S3 Bucket     │                  │
+│                            │                    │                  │
+│                            │  - symbols.csv     │                  │
+│                            │  - YYYY-MM-DD-     │                  │
+│                            │    batch-N.parquet │                  │
+│                            └─────────┬──────────┘                  │
+│                                      │                             │
+│                     ┌────────────────▼────────────┐                │
+│                     │   Local/Lambda Module       │                │
+│                     │  Data Aggregator +          │                │
+│                     │  Indicator Calculator +     │                │
+│                     │  Backtesting Engine         │                │
+│                     └─────────────────────────────┘                │
+└───────────────────────────────────────────────────────────────────┘
 ```
+
+### Orchestration Flow
+
+**Step 1: ASX Symbol Updater** (Daily)
+- Fetches latest ASX-listed companies
+- Exports symbol list as CSV to S3
+- Output: `s3://bucket/symbols/YYYY-MM-DD-symbols.csv`
+
+**Step 2: Parallel Stock Data Fetching**
+- Reads symbol list from Step 1
+- Splits symbols into batches of 100
+- Invokes Lambda instances in parallel (one per batch)
+- Each Lambda fetches data for its 100 symbols
+- Each Lambda saves batch as Parquet: `s3://bucket/raw-data/YYYY-MM-DD-batch-N.parquet`
+
+**Benefits:**
+- Parallel processing (multiple batches at once)
+- Handles large symbol lists (1000+ stocks)
+- Respects rate limits per Lambda instance
+- Fault isolation (one batch failure doesn't affect others)
+- Cost-efficient (only pay for concurrent executions)
+
+**For detailed architecture documentation, see [STEP_FUNCTIONS_ARCHITECTURE.md](STEP_FUNCTIONS_ARCHITECTURE.md)**
+
+## Step Functions Orchestration
+
+The pipeline uses AWS Step Functions to coordinate the daily workflow. See the dedicated [Step Functions Architecture](STEP_FUNCTIONS_ARCHITECTURE.md) document for complete details including:
+
+- Detailed state machine definition
+- Execution flow and timing analysis
+- Error handling and retry strategies
+- Performance characteristics and cost breakdown
+- Monitoring and alerting setup
+- Integration with Data Aggregator
+
+**Quick Summary:**
+- **Trigger:** EventBridge daily at 6:00 AM AEST
+- **Step 1:** Fetch ASX symbols → Export CSV → Split into batches
+- **Step 2:** Process 10 batches in parallel (100 symbols each)
+- **Duration:** ~5-8 minutes for 1000+ symbols
+- **Cost:** ~$1.41/month
 
 ## Modules
 
 ### 1. Stock Data Fetcher (Lambda)
-**Purpose:** Periodically download daily stock data from Yahoo Finance
+**Purpose:** Fetch daily stock data for a batch of symbols from Yahoo Finance
 
 **Specifications:**
-- **Trigger:** EventBridge rule (daily, configurable time)
+- **Trigger:** AWS Step Functions (invoked with symbol batch)
 - **Runtime:** Python 3.12+
 - **Dependencies:** `yfinance`, `polars`, `pyarrow`, `boto3`
-- **Input:** Configuration file (`config/symbols.json`) containing stock symbols
-- **Output:** Parquet files in S3 (`s3://bucket-name/raw-data/YYYY-MM-DD.parquet`)
-- **Data per file:** Multiple stock symbols aggregated per day
+- **Input:** List of up to 100 stock symbols from Step Functions
+- **Output:** Parquet file in S3 (`s3://bucket-name/raw-data/YYYY-MM-DD-batch-N.parquet`)
+- **Batch Size:** 100 symbols per invocation
 - **Rate Limiting:** 2-second delay between symbols (built-in yfinance protection)
-- **Error Handling:** Exponential backoff retry logic, failure notifications via SNS
-- **Timeout:** 15 minutes (to handle rate limits gracefully)
+- **Error Handling:** Exponential backoff retry logic, continues on individual symbol failures
+- **Timeout:** 15 minutes (to handle yfinance rate limits gracefully)
 - **Memory:** 512 MB
+- **Concurrency:** Multiple instances run in parallel for different batches
 
 **Data Fields:**
 - symbol (string)
@@ -96,54 +175,92 @@ This repository contains a serverless data pipeline for:
 - close (float)
 - volume (int64)
 - adjusted_close (float)
+- fetch_timestamp (string)
 
 ### 2. ASX Symbol Updater (Lambda)
-**Purpose:** Maintain up-to-date list of ASX stock symbols
+**Purpose:** Fetch and maintain the list of ASX-listed stock symbols
 
 **Specifications:**
-- **Trigger:** EventBridge rule (weekly, configurable)
+- **Trigger:** AWS Step Functions (Step 1 of daily orchestration)
 - **Runtime:** Python 3.12+
-- **Dependencies:** `requests`, `beautifulsoup4`, `boto3`
-- **Source:** ASX official website
+- **Dependencies:** `requests`, `beautifulsoup4`, `pandas`, `boto3`
+- **Source:** ASX official website or API
 - **Output:** 
-  - Updated `config/symbols.json` in S3
-  - Versioned for rollback capability
-- **Change Detection:** Compare with previous version, log additions/removals
-- **Timeout:** 3 minutes
+  - CSV file: `s3://bucket/symbols/YYYY-MM-DD-symbols.csv`
+  - Returns symbol list to Step Functions for next step
+- **Format:** CSV with columns: symbol, name, sector, market_cap
+- **Change Detection:** Logs additions/removals compared to previous day
+- **Timeout:** 5 minutes
 - **Memory:** 256 MB
 
-**Symbol List Schema:**
+**Output Schema:**
+```csv
+symbol,name,sector,market_cap
+BHP,BHP Group Limited,Materials,180500000000
+CBA,Commonwealth Bank,Financials,165200000000
+```
+
+### 3. Step Functions State Machine
+**Purpose:** Orchestrate the daily data pipeline
+
+**State Flow:**
 ```json
 {
-  "updated_at": "2025-12-25T00:00:00Z",
-  "source": "asx_official",
-  "symbols": [
-    {
-      "symbol": "BHP",
-      "name": "BHP Group Limited",
-      "sector": "Materials"
+  "Comment": "Daily Stock Data Pipeline",
+  "StartAt": "UpdateASXSymbols",
+  "States": {
+    "UpdateASXSymbols": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:REGION:ACCOUNT:function:asx-symbol-updater",
+      "Next": "SplitIntoBatches"
+    },
+    "SplitIntoBatches": {
+      "Type": "Map",
+      "ItemsPath": "$.symbolBatches",
+      "MaxConcurrency": 10,
+      "Iterator": {
+        "StartAt": "FetchStockData",
+        "States": {
+          "FetchStockData": {
+            "Type": "Task",
+            "Resource": "arn:aws:lambda:REGION:ACCOUNT:function:stock-data-fetcher",
+            "End": true
+          }
+        }
+      },
+      "End": true
     }
-  ]
+  }
 }
 ```
 
-### 3. Data Aggregator Module
-**Purpose:** Read and consolidate all historical S3 data into a single in-memory dataset
+**Specifications:**
+- **Trigger:** EventBridge rule (daily at configurable time)
+- **Max Concurrency:** 10 parallel Lambda executions
+- **Retry Logic:** Automatic retry on task failures
+- **Error Handling:** Continues processing other batches on individual failures
+- **Execution Time:** ~20-30 minutes for 1000 symbols (10 batches of 100)
+- **Cost:** Pay only for Lambda execution time and Step Functions transitions
+
+### 4. Data Aggregator Module
+**Purpose:** Read and consolidate historical S3 data from multiple batch files
 
 **Specifications:**
 - **Runtime:** Python module (can run locally or in Lambda)
 - **Dependencies:** `polars`, `boto3`, `pyarrow`
-- **Input:** S3 bucket path containing all parquet files
+- **Input:** S3 bucket path containing all parquet files (batches)
 - **Output:** Single Polars DataFrame with all historical data
 - **Memory Considerations:** Lazy loading with Polars scan_parquet for large datasets
 - **Caching:** Optional local cache for development
+- **Batch Handling:** Automatically merges multiple batch files per date
 
 **Key Functions:**
 - `load_all_data(bucket: str, prefix: str) -> pl.DataFrame`
 - `load_date_range(start_date: date, end_date: date) -> pl.DataFrame`
 - `load_symbols(symbols: List[str]) -> pl.DataFrame`
+- `merge_daily_batches(date: date) -> pl.DataFrame` - Combines all batch-N files for a date
 
-### 4. Technical Indicators & Backtesting Module
+### 5. Technical Indicators & Backtesting Module
 **Purpose:** Calculate technical indicators and perform strategy backtesting
 
 **Specifications:**

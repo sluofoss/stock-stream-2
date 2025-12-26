@@ -11,6 +11,21 @@ Ensure you have the following installed:
 - Terraform 1.5+
 - Git
 
+## Architecture Overview
+
+The system uses **AWS Step Functions** to orchestrate a daily pipeline:
+
+1. **Step 1:** Lambda updates ASX symbol list → exports CSV to S3
+2. **Step 2:** Step Functions splits symbols into batches of 100
+3. **Step 3:** Multiple Lambda instances fetch data in parallel (max 10 concurrent)
+4. **Step 4:** Each Lambda saves batch as Parquet file to S3
+
+**Benefits:**
+- Process 1000+ symbols in ~5 minutes
+- Parallel execution with fault isolation
+- Automatic retry on failures
+- Cost-efficient (~$3/month)
+
 ## Step 1: Clone and Setup
 
 ```bash

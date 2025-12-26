@@ -65,8 +65,18 @@ Issues = "https://github.com/yourusername/stock-stream-2/issues"
 requires = ["uv_build>=0.9.18,<0.10.0"]
 build-backend = "uv_build"
 
-[tool.uv.build-backend]
-module-root = "."
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = [
+    "modules/common",
+    "modules/stock_data_fetcher",
+    "modules/asx_symbol_updater",
+    "modules/data_aggregator",
+    "modules/backtesting",
+    "modules/indicators",
+]
 
 [tool.ruff]
 line-length = 100

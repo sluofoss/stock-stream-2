@@ -127,36 +127,150 @@
 
 ## Architectural Decisions
 
-### 1. Daily File Granularity
-**Decision:** Store one Parquet file per day with all symbols.
+### 1. Step Functions for Orchestration
+**Decision:** Use AWS Step Functions to orchestrate the daily pipeline.
 
 **Rationale:**
-- Simplifies data organization
-- Easy to identify missing dates
-- Efficient for date-range queries
-- Manageable file sizes (< 1MB per day for 100 symbols)
-- Simplifies lifecycle management
+- **Parallel Processing:** Map state enables parallel Lambda invocations for symbol batches
+- **Built-in Retry Logic:** Automatic retries with exponential backoff
+- **Error Handling:** Individual batch failures don't affect other batches
+- **Visual Monitoring:** Easy to see pipeline progress and identify failures
+- **State Management:** Maintains execution state across multiple Lambda invocations
+- **Cost-Effective:** Only pay for state transitions (~$0.025 per 1000 transitions)
+- **Scalability:** Can process 1000+ symbols in parallel batches
+
+**Architecture:**
+```
+EventBridge (Daily) 
+    → Step Functions
+        → Lambda: ASX Symbol Updater (Step 1)
+            → Returns symbolBatches array
+        → Map State: Parallel Processing (Step 2)
+            → Lambda: Stock Fetcher (Batch 0: symbols 0-99)
+            → Lambda: Stock Fetcher (Batch 1: symbols 100-199)
+            → Lambda: Stock Fetcher (Batch N: symbols N*100-(N+1)*100-1)
+            → Max 10 concurrent executions
+```
+
+**Benefits:**
+- Process 1000 symbols in ~5 minutes (vs 33 minutes sequentially)
+- Isolated failures (one batch fails, others continue)
+- Respects rate limits per Lambda instance
+- Automatic retry and error handling
+- Pay only for execution time
 
 **Alternatives Considered:**
-- One file per symbol: Rejected (too many files)
-- One file per month: Rejected (harder to update)
-- One file total: Rejected (too large, hard to update)
+- Single Lambda with all symbols: Rejected due to timeout risks (15-minute limit)
+- EventBridge Fan-Out: Rejected due to complexity and lack of coordination
+- SQS Queue: Rejected due to added complexity and slower processing
+- Manual batching: Rejected due to lack of built-in retry/error handling
 
-### 2. Separate Lambda Functions
-**Decision:** Use separate Lambdas for data fetching and symbol updates.
+### 2. Batch Size of 100 Symbols
+**Decision:** Process symbols in batches of 100 per Lambda invocation.
+
+**Rationale:**
+- **Execution Time:** 100 symbols × 2s = 200s + overhead = ~3-4 minutes (safe margin)
+- **Rate Limiting:** Each Lambda instance manages its own rate limits independently
+- **Fault Isolation:** Failure in one batch doesn't affect others
+- **Parallelization:** 10 concurrent batches = 1000 symbols in ~4 minutes
+- **Cost Optimization:** Smaller batches = more efficient Lambda resource usage
+
+**Timing Analysis:**
+- 100 symbols × 2s delay = 200s minimum
+- Overhead (initialization, S3 upload) = 30-60s
+- Total per batch: 3-4 minutes
+- Well within 15-minute Lambda timeout
+
+**Alternatives Considered:**
+- 30-50 symbols: Rejected (too many parallel Lambdas, higher cost)
+- 200+ symbols: Rejected (timeout risk if rate limited)
+- Dynamic batching: Rejected (added complexity)
+
+### 3. Parquet Files per Batch
+**Decision:** Store separate Parquet files for each batch per day.
+
+**Rationale:**
+- **Parallel Writes:** Multiple Lambdas can write simultaneously without conflicts
+- **Fault Tolerance:** Failed batches don't corrupt successful batches
+- **Incremental Updates:** Can re-run failed batches without reprocessing all symbols
+- **Manageable Size:** Each file ~100KB-500KB (100 symbols × 1 day)
+- **Easy Aggregation:** Data aggregator merges batches when reading
+
+**File Structure:**
+```
+s3://bucket/raw-data/
+├── 2025-12-26-batch-0.parquet   (symbols 0-99)
+├── 2025-12-26-batch-1.parquet   (symbols 100-199)
+├── 2025-12-26-batch-2.parquet   (symbols 200-299)
+└── ...
+```
+
+**Data Aggregator Behavior:**
+- Automatically discovers all batch files for a date
+- Merges into single DataFrame on read
+- Caches merged results for performance
+
+**Alternatives Considered:**
+- Single file per day: Rejected (serial writes, risk of data loss on failure)
+- One file per symbol: Rejected (too many files, hard to manage)
+- Atomic merge in Lambda: Rejected (requires coordination, slower)
+
+### 4. CSV Output for Symbol Lists
+**Decision:** Export ASX symbol lists as CSV (not JSON).
+
+**Rationale:**
+- **Human Readable:** Easy to inspect and verify
+- **Universal Format:** Compatible with Excel, Pandas, Polars, etc.
+- **Smaller Size:** CSV is more compact than JSON for tabular data
+- **Versioning:** Easy to diff changes between days using standard tools
+- **Processing:** Polars/Pandas read CSV efficiently
+
+**Format:**
+```csv
+symbol,name,sector,market_cap,last_updated
+BHP,BHP Group Limited,Materials,180500000000,2025-12-26T00:00:00Z
+```
+
+**Alternatives Considered:**
+- JSON: Rejected (larger file size, less human-readable)
+- Parquet: Rejected (overkill for small metadata files)
+- DynamoDB: Rejected (unnecessary cost and complexity)
+
+### 5. Max Concurrency of 10
+**Decision:** Limit Step Functions Map state to 10 concurrent Lambda executions.
+
+**Rationale:**
+- **Rate Limit Safety:** Yahoo Finance has global rate limits; 10 concurrent = manageable
+- **Cost Control:** Prevents runaway costs from too many parallel invocations
+- **Lambda Quotas:** Default account limit is 1000 concurrent executions (plenty of headroom)
+- **Performance:** 10 concurrent batches process 1000 symbols in ~4 minutes
+
+**Scaling Math:**
+- 1 batch (100 symbols) = 4 minutes
+- 10 parallel batches (1000 symbols) = 4 minutes
+- 22 batches (2200 symbols) = 2 waves = ~8 minutes
+
+**Alternatives Considered:**
+- Unlimited concurrency: Rejected (rate limit risk, cost risk)
+- Lower (5): Rejected (slower processing)
+- Higher (20): Rejected (marginal benefit, higher risk)
+
+### 6. Separate Lambda Functions
+**Decision:** Use separate Lambdas for symbol updating and data fetching.
 
 **Rationale:**
 - Single Responsibility Principle
-- Different execution frequencies
+- Different execution frequencies (daily vs per-batch)
+- Different timeout requirements (5min vs 15min)
+- Different memory requirements (256MB vs 512MB)
 - Easier to debug and monitor
-- Different timeout requirements
 - Independent scaling
 
 **Alternatives Considered:**
 - Single Lambda: Rejected due to complexity
-- Step Functions: Rejected due to unnecessary overhead
+- Monolithic architecture: Rejected due to inflexibility
 
-### 3. S3 as Data Lake
+### 7. S3 as Data Lake
 **Decision:** Use S3 as the primary data storage.
 
 **Rationale:**
@@ -165,13 +279,14 @@
 - Unlimited scalability
 - Native integration with Lambda
 - Versioning support
+- Supports parallel writes from multiple Lambdas
 
 **Alternatives Considered:**
 - RDS/Aurora: Rejected due to cost and schema rigidity
 - DynamoDB: Rejected due to query limitations
 - Redshift: Rejected due to overkill and cost
 
-### 4. Local Backtesting
+### 8. Local Backtesting
 **Decision:** Run backtesting locally, not in Lambda.
 
 **Rationale:**
@@ -184,7 +299,7 @@
 **Alternatives Considered:**
 - Lambda backtesting: May implement later for automation
 
-### 5. Stateful Strategy Pattern
+### 9. Stateful Strategy Pattern
 **Decision:** Strategies maintain state between data points.
 
 **Rationale:**

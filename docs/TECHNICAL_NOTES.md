@@ -1,5 +1,15 @@
 # Technical Notes & Clarifications
 
+## Architecture Overview
+
+**See [STEP_FUNCTIONS_ARCHITECTURE.md](STEP_FUNCTIONS_ARCHITECTURE.md) for complete architecture details.**
+
+The system uses AWS Step Functions to orchestrate parallel batch processing:
+- **Step 1:** ASX Symbol Updater fetches and exports symbol list
+- **Step 2:** Step Functions splits symbols into batches of 100
+- **Step 3:** Multiple Lambda instances process batches in parallel (max 10 concurrent)
+- **Result:** 1000+ symbols processed in ~5 minutes with fault isolation
+
 ## Critical Implementation Details
 
 ### 1. yfinance Rate Limiting

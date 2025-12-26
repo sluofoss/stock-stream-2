@@ -29,16 +29,17 @@ class S3Storage:
         self.s3_client = boto3.client("s3", region_name=region)
 
     def upload_dataframe(
-        self, df: pl.DataFrame, upload_date: date | None = None
+        self, df: pl.DataFrame, upload_date: date | None = None, batch_number: int | None = None
     ) -> str:
         """Upload DataFrame to S3 as Parquet file.
 
         Args:
             df: Polars DataFrame with stock data
             upload_date: Date for the file (defaults to today)
+            batch_number: Optional batch number for parallel processing (e.g., 0, 1, 2...)
 
         Returns:
-            S3 key of uploaded file
+            S3 key of uploaded file (e.g., "raw-data/2025-12-26-batch-0.parquet")
 
         Raises:
             StorageError: If upload fails
@@ -48,7 +49,14 @@ class S3Storage:
 
         # Use provided date or today's date
         file_date = upload_date or date.today()
-        s3_key = f"{self.prefix}{file_date.isoformat()}.parquet"
+        
+        # Create filename with optional batch number
+        if batch_number is not None:
+            filename = f"{file_date.isoformat()}-batch-{batch_number}.parquet"
+        else:
+            filename = f"{file_date.isoformat()}.parquet"
+        
+        s3_key = f"{self.prefix}{filename}"
 
         try:
             # Write DataFrame to Parquet in memory
@@ -56,10 +64,11 @@ class S3Storage:
                 f"Writing {df.height} rows to Parquet format",
                 rows=df.height,
                 date=str(file_date),
+                batch_number=batch_number,
             )
 
             # Write to temporary file first
-            temp_path = f"/tmp/{file_date.isoformat()}.parquet"
+            temp_path = f"/tmp/{filename}"
             df.write_parquet(temp_path, compression="snappy")
 
             # Upload to S3
