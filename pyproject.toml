@@ -1,8 +1,8 @@
 [project]
-name = "stock-stream-2"
+name = "modules"
 version = "0.1.0"
 description = "A serverless stock data pipeline and backtesting framework for ASX stocks"
-readme = "README.md"
+readme = "docs/README.md"
 requires-python = ">=3.12"
 authors = [
     {name = "Your Name", email = "your.email@example.com"}
@@ -62,12 +62,11 @@ Repository = "https://github.com/yourusername/stock-stream-2"
 Issues = "https://github.com/yourusername/stock-stream-2/issues"
 
 [build-system]
-requires = ["setuptools>=68.0", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["uv_build>=0.9.18,<0.10.0"]
+build-backend = "uv_build"
 
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["modules*"]
+[tool.uv.build-backend]
+module-root = "."
 
 [tool.ruff]
 line-length = 100
