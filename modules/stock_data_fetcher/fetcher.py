@@ -6,12 +6,11 @@ from typing import Any
 
 import polars as pl
 import yfinance as yf
+from loguru import logger
 
 from modules.common.exceptions import DataFetchError, RateLimitError
-from modules.common.logger import get_logger
+from modules.common import logger as _  # noqa: F401
 from modules.common.validators import validate_dataframe, validate_symbol
-
-logger = get_logger(__name__)
 
 
 class YahooFinanceFetcher:

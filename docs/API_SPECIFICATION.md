@@ -117,6 +117,13 @@ def lambda_handler(event: dict, context: LambdaContext) -> dict:
     AWS Lambda handler for updating ASX symbols.
     First step in Step Functions workflow.
     
+    Workflow:
+    1. Downloads CSV from ASX website (https://www.asx.com.au/markets/trade-our-cash-market/directory)
+    2. Uploads CSV to S3: symbols/YYYY-MM-DD-symbols.csv
+    3. Retrieves latest file from S3 (the one just uploaded)
+    4. Splits symbols into batches of 100
+    5. Returns formatted output for Step Functions
+    
     Args:
         event: Step Functions initiation event (typically empty or with date override)
         context: AWS Lambda context object
@@ -130,20 +137,45 @@ def lambda_handler(event: dict, context: LambdaContext) -> dict:
             'metadata': {
                 'total_symbols': int,
                 'num_batches': int,
+                'batch_size': int,
                 's3_key': str,              # CSV location
-                'changes': {
-                    'added': List[str],
-                    'removed': List[str]
-                }
+                'execution_time': float
             }
         }
+    
+    Environment Variables Required:
+        S3_BUCKET: S3 bucket name for storing symbols CSV
     """
 ```
+
+#### Implementation Details
+
+**CSV Download Process:**
+1. Fetches HTML from ASX directory page
+2. Parses HTML to find CSV download link using BeautifulSoup
+3. Extracts download URL from link's onclick or href attribute
+4. Downloads CSV file
+5. Validates CSV contains company data
+
+**CSV Parsing:**
+- Handles various column name formats:
+  - Symbol: 'ASX code', 'Code', 'Symbol', 'Ticker'
+  - Name: 'Company name', 'Name', 'Company'
+  - Sector: 'GICS industry group', 'Industry', 'Sector'
+  - Market Cap: 'Market Cap', 'MarketCap'
+- Filters out invalid rows (missing symbol or name)
+- Returns list of company dictionaries
+
+**Batch Splitting:**
+- Batch size: 100 symbols (configurable via BATCH_SIZE constant)
+- Each batch includes: symbols array and batchNumber
+- Example: 2147 symbols → 22 batches (21 full + 1 partial)
 
 #### Output Format for Step Functions
 ```json
 {
   "statusCode": 200,
+  "body": "{...}",
   "symbols": ["BHP", "CBA", "NAB", ...],
   "symbolBatches": [
     {
@@ -156,19 +188,27 @@ def lambda_handler(event: dict, context: LambdaContext) -> dict:
     }
   ],
   "metadata": {
+    "request_id": "abc-123",
+    "timestamp": "2025-12-26T00:00:00Z",
     "total_symbols": 2147,
     "num_batches": 22,
-    "s3_key": "symbols/2025-12-26-symbols.csv"
+    "batch_size": 100,
+    "s3_key": "symbols/2025-12-26-symbols.csv",
+    "execution_time": 45.3
   }
 }
 ```
 
 #### CSV Output Schema (S3)
+The downloaded CSV is stored as-is from ASX website. Typical columns:
 ```csv
-symbol,name,sector,market_cap,last_updated
-BHP,BHP Group Limited,Materials,180500000000,2025-12-26T00:00:00Z
-CBA,Commonwealth Bank,Financials,165200000000,2025-12-26T00:00:00Z
+symbol,name,sector,market_cap
+BHP,BHP Group Limited,Materials,180500000000
+CBA,Commonwealth Bank,Financials,165200000000
+NAB,National Australia Bank,Financials,98450000000
 ```
+
+Note: Column names may vary based on ASX website format. The parser handles multiple formats.
 
 ### 3. Step Functions State Machine
 

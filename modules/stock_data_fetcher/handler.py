@@ -5,14 +5,13 @@ import os
 from datetime import date, datetime
 from typing import Any
 
+from loguru import logger
+
 from modules.common.exceptions import StockStreamError
-from modules.common.logger import get_logger
+from modules.common import logger as _  # noqa: F401 - triggers auto-configuration
 from modules.stock_data_fetcher.config import Config
 from modules.stock_data_fetcher.fetcher import YahooFinanceFetcher
 from modules.stock_data_fetcher.storage import S3Storage
-
-# Initialize logger
-logger = get_logger(__name__, level=os.getenv("LOG_LEVEL", "INFO"))
 
 
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:

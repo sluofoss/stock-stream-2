@@ -33,13 +33,63 @@ The system uses **AWS Step Functions** to orchestrate a daily pipeline:
 git clone <repository-url>
 cd stock-stream-2
 
-# Create virtual environment
+# Create virtual environment with uv
 uv venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+
+# Activate virtual environment
+source .venv/bin/activate  # On Linux/Mac
+# or
+.venv\Scripts\activate  # On Windows
 
 # Install dependencies
-uv pip install -e ".[dev]"
+uv pip install polars pyarrow boto3 yfinance requests beautifulsoup4 python-dotenv loguru
+
+# For development (includes pytest, mypy, ruff, etc.)
+# uv pip install pytest pytest-cov pytest-mock mypy ruff black moto
 ```
+
+## Step 1.5: Test Locally (Optional but Recommended)
+
+Before deploying to AWS, test the modules locally:
+
+### Test ASX Symbol Updater
+
+```bash
+# Run with mock data (no AWS required)
+python scripts/run_asx_updater_local.py
+```
+
+You should see output like:
+```
+================================================================================
+ASX Symbol Updater - Local Test Mode
+================================================================================
+
+Running with mock data (no AWS S3 access required)
+
+...logs...
+
+================================================================================
+Execution Complete
+================================================================================
+
+Status Code: 200
+✅ SUCCESS
+  - Total Symbols: 10
+  - Number of Batches: 1
+  - Batch Size: 100
+  - S3 Key: symbols/2025-12-26-symbols.csv
+  - Execution Time: 0.001s
+
+Symbol Batches:
+  - Batch 0: 10 symbols
+```
+
+This confirms:
+- Python environment is set up correctly
+- All dependencies are installed
+- The module logic works
+- Step Functions output format is correct
 
 ## Step 2: Configure AWS
 

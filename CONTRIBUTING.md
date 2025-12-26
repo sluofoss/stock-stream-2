@@ -51,18 +51,30 @@ We are committed to providing a welcoming and inclusive environment for all cont
 
 3. **Install Dependencies**
    ```bash
-   make install-dev
+   # Core dependencies
+   uv pip install polars pyarrow boto3 yfinance requests beautifulsoup4 python-dotenv loguru
+
+   # Development dependencies (testing, linting, type checking)
+   uv pip install pytest pytest-cov pytest-mock mypy ruff black moto
    ```
 
-4. **Set Up Environment**
+4. **Test Locally First (Recommended)**
+   ```bash
+   # Test ASX Symbol Updater with mock data (no AWS required)
+   python scripts/run_asx_updater_local.py
+   
+   # You should see: ✅ SUCCESS with batch information
+   ```
+
+5. **Set Up Environment (for AWS testing)**
    ```bash
    cp .env.example .env
-   # Edit .env with your settings
+   # Edit .env with your AWS credentials if testing with real S3
    ```
 
-5. **Install Pre-commit Hooks**
+6. **Install Pre-commit Hooks (Optional)**
    ```bash
-   pre-commit install
+   pre-commit install  # If you have pre-commit installed
    ```
 
 ## Development Workflow
@@ -89,18 +101,24 @@ Branch naming conventions:
 
 ### 3. Test Your Changes
 ```bash
-# Run all tests
-make test
+# Quick local test with mock data (no AWS required)
+python scripts/run_asx_updater_local.py
 
-# Run specific tests
-make test-unit
-make test-integration
+# Run unit tests (when available)
+pytest tests/unit -v
+
+# Run all tests
+pytest tests/ -v
 
 # Check code quality
-make lint
-make type-check
+ruff check modules/
+
+# Type checking
+mypy modules/
 
 # Format code
+black modules/ tests/ scripts/
+```
 make format
 ```
 

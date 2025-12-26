@@ -21,6 +21,20 @@ A serverless stock data pipeline and backtesting framework for ASX stocks, deplo
 - [Troubleshooting](#troubleshooting)
 - [Roadmap](#roadmap)
 
+## Quick Links
+
+📚 **Documentation:**
+- [Quick Start Guide](QUICK_START.md) - Get started in 5 minutes
+- [Local Testing Setup](LOCAL_TESTING_SETUP.md) - Test without AWS
+- [API Specification](API_SPECIFICATION.md) - Lambda function contracts
+- [Contributing Guide](../CONTRIBUTING.md) - Development workflow
+
+🔧 **Technical Guides:**
+- [Step Functions Architecture](STEP_FUNCTIONS_ARCHITECTURE.md)
+- [Design Decisions](DESIGN_DECISIONS.md)
+- [Logging Guide](LOGGING_GUIDE.md)
+- [Data Validation](DATA_VALIDATION.md)
+
 ## Overview
 
 This repository contains a serverless data pipeline for:
@@ -314,18 +328,32 @@ cd stock-stream-2
 
 ### 2. Install Dependencies
 ```bash
-# Using uv
+# Create virtual environment
 uv venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-uv pip install -e ".[dev]"
+
+# Install core dependencies
+uv pip install polars pyarrow boto3 yfinance requests beautifulsoup4 python-dotenv loguru
+
+# Install development dependencies (optional, for testing/linting)
+uv pip install pytest pytest-cov pytest-mock mypy ruff black moto
 ```
 
-### 3. Configure AWS Credentials
+### 3. Test Locally (Recommended)
+Verify your setup before deploying to AWS:
+```bash
+# Test with mock data (no AWS credentials needed)
+python scripts/run_asx_updater_local.py
+```
+
+You should see `✅ SUCCESS` output confirming the environment is working.
+
+### 4. Configure AWS Credentials
 ```bash
 aws configure
 ```
 
-### 4. Initialize Terraform
+### 5. Initialize Terraform
 ```bash
 cd terraform
 terraform init
@@ -570,27 +598,77 @@ make clean         # Clean build artifacts
 
 ## Testing
 
+### Local Testing (No AWS Required)
+
+Test modules locally with mock data before deploying:
+
+```bash
+# Test ASX Symbol Updater with mock data
+python scripts/run_asx_updater_local.py
+```
+
+Expected output:
+```
+================================================================================
+ASX Symbol Updater - Local Test Mode
+================================================================================
+
+Running with mock data (no AWS S3 access required)
+
+...logs...
+
+================================================================================
+Execution Complete
+================================================================================
+
+Status Code: 200
+✅ SUCCESS
+  - Total Symbols: 10
+  - Number of Batches: 1
+  - Batch Size: 100
+  - S3 Key: symbols/2025-12-26-symbols.csv
+  - Execution Time: 0.001s
+```
+
+See module-specific README files for detailed testing instructions:
+- [ASX Symbol Updater Testing](../modules/asx_symbol_updater/README.md#testing)
+
 ### Unit Tests
 ```bash
+# Run all unit tests
 pytest tests/unit -v
+
+# Run specific test file
+pytest tests/unit/test_validators.py -v
+
+# Run with coverage
+pytest tests/unit --cov=modules --cov-report=term-missing
 ```
 
 ### Integration Tests
 ```bash
-# Requires AWS credentials
-pytest tests/integration -v --aws
+# Requires AWS credentials configured
+pytest tests/integration -v
+
+# Test specific Lambda handler
+pytest tests/integration/test_lambda_handler.py -v
 ```
 
 ### End-to-End Tests
 ```bash
-# Test full pipeline
-python scripts/e2e_test.py
+# Test full Step Functions pipeline (requires deployed infrastructure)
+python scripts/e2e_test.py --state-machine-arn arn:aws:states:...
 ```
 
 ### Test Coverage
 ```bash
-pytest --cov=modules --cov-report=html
-open htmlcov/index.html
+# Generate HTML coverage report
+pytest tests/ --cov=modules --cov-report=html
+
+# Open report in browser
+xdg-open htmlcov/index.html  # Linux
+# or
+open htmlcov/index.html      # macOS
 ```
 
 ## Cost Estimation

@@ -5,11 +5,10 @@ from pathlib import Path
 
 import boto3
 import polars as pl
+from loguru import logger
 
 from modules.common.exceptions import StorageError
-from modules.common.logger import get_logger
-
-logger = get_logger(__name__)
+from modules.common import logger as _  # noqa: F401
 
 
 class S3Storage:

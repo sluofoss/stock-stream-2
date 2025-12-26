@@ -67,42 +67,43 @@
 - [ ] Test batch processing logic
 
 ### Lambda Packaging
-- [ ] Create modules/stock_data_fetcher/requirements.txt
+- [x] Dependencies in root pyproject.toml
 - [ ] Create build script for Lambda deployment package
 - [ ] Test Lambda package locally with SAM CLI (optional)
 - [ ] Optimize package size (remove unnecessary dependencies)
 
-## Phase 3: Module 2 - ASX Symbol Updater
+## Phase 3: Module 2 - ASX Symbol Updater ✅ COMPLETED
 
 ### Core Implementation
-- [ ] Create modules/asx_symbol_updater/handler.py
-- [ ] Implement lambda_handler function
-- [ ] Return symbolBatches array for Step Functions Map state
-- [ ] Format output: [{symbols: [...], batchNumber: N}, ...]
-- [ ] Create modules/asx_symbol_updater/scraper.py
-- [ ] Implement ASX website scraper or API client
-- [ ] Add CSV parsing logic
-- [ ] Create modules/asx_symbol_updater/batcher.py
-- [ ] Implement batch splitting logic (100 symbols per batch)
-- [ ] Create modules/asx_symbol_updater/comparator.py
-- [ ] Implement version comparison logic
-- [ ] Detect additions, removals, modifications
-- [ ] Create modules/asx_symbol_updater/publisher.py
-- [ ] Implement S3 CSV upload (symbols/YYYY-MM-DD-symbols.csv)
+- [x] Create modules/asx_symbol_updater/handler.py
+- [x] Implement lambda_handler function
+- [x] Return symbolBatches array for Step Functions Map state
+- [x] Format output: [{symbols: [...], batchNumber: N}, ...]
+- [x] Implement ASX website CSV download (integrated in handler)
+- [x] Add CSV parsing logic (parse_asx_csv function)
+- [x] Implement batch splitting logic (split_into_batches function)
+- [x] Implement S3 CSV upload (symbols/YYYY-MM-DD-symbols.csv)
+- [x] Retrieve latest file from S3 after upload
+- [x] Extract CSV download URL from ASX directory page
+- [x] Handle various CSV column name formats
+- [ ] Create modules/asx_symbol_updater/comparator.py (optional)
+- [ ] Implement version comparison logic (optional)
+- [ ] Detect additions, removals, modifications (optional)
 - [ ] Add change notification via SNS (optional)
 
 ### Testing
-- [ ] Write unit tests for scraper
-- [ ] Create fixtures for mock ASX data
+- [ ] Write unit tests for CSV download and parsing
+- [ ] Create fixtures for mock ASX CSV data
 - [ ] Write unit tests for batch splitting (edge cases: 0, 99, 100, 101, 1000)
-- [ ] Write unit tests for comparator
-- [ ] Write unit tests for publisher
+- [ ] Write unit tests for S3 upload/download
 - [ ] Write integration tests with mocked ASX website
 - [ ] Test Step Functions output format
+- [ ] Test error handling for website changes
 
 ### Lambda Packaging
-- [ ] Create modules/asx_symbol_updater/requirements.txt
-- [ ] Create build script for Lambda package
+- [x] Dependencies added to root pyproject.toml
+- [ ] Create build script for Lambda deployment package
+- [ ] Test locally with mock S3
 
 ## Phase 3.5: Step Functions Integration
 

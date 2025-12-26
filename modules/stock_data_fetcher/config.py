@@ -5,12 +5,11 @@ import os
 from typing import Any
 
 import boto3
+from loguru import logger
 
 from modules.common.exceptions import ConfigurationError
-from modules.common.logger import get_logger
+from modules.common import logger as _  # noqa: F401
 from modules.common.validators import validate_config
-
-logger = get_logger(__name__)
 
 
 class Config:
